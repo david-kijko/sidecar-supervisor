@@ -61,7 +61,8 @@ test("sidecar start creates a session, checkpoint, and telemetry branch", () =>
     const repo = makeTempDir();
     initGitRepo(repo);
     fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
-    run("git", ["add", "README.md"], { cwd: repo });
+    fs.writeFileSync(path.join(repo, ".gitignore"), "*.log\n");
+    run("git", ["add", "README.md", ".gitignore"], { cwd: repo });
     run("git", ["commit", "-m", "init"], { cwd: repo });
 
     const policy = loadScoringPolicy(PLUGIN_ROOT);
@@ -90,6 +91,7 @@ test("sidecar start creates a session, checkpoint, and telemetry branch", () =>
     assert.equal(status.tasks[0].title, "Investigate regressions");
     assert.equal(status.latestCheckpoint.reason, "session-start");
     assert.equal(status.latestCheckpoint.telemetry_branch, "sidecar/telemetry/sess-start");
+    assert.match(status.latestCheckpoint.telemetry_commit, /^[0-9a-f]{40}$/);
     assert.match(status.dbPath, /strap\.db$/);
 
     const branchCheck = run("git", ["-C", repo, "show-ref", "--verify", "refs/heads/sidecar/telemetry/sess-start"]);

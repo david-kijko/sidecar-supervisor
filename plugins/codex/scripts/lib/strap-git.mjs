@@ -49,7 +49,7 @@ export function commitTelemetryCheckpoint({ workspaceRoot, sessionId, checkpoint
     artifactLog
   });
 
-  runCommandChecked("git", ["-C", worktreeDir, "add", jsonRelative, logRelative]);
+  runCommandChecked("git", ["-C", worktreeDir, "add", "-f", jsonRelative, logRelative]);
   const stagedDiff = runCommand("git", ["-C", worktreeDir, "diff", "--cached", "--quiet"]);
   if (stagedDiff.status === 0) {
     const head = runCommandChecked("git", ["-C", worktreeDir, "rev-parse", "HEAD"]).stdout.trim();
