@@ -79,8 +79,40 @@ test("continue is not exposed as a user-facing command", () => {
     "result.md",
     "review.md",
     "setup.md",
+    "sidecar-checkpoint.md",
+    "sidecar-correct.md",
+    "sidecar-start.md",
+    "sidecar-status.md",
+    "sidecar-stop.md",
+    "sidecar-task.md",
     "status.md"
   ]);
+});
+
+test("sidecar commands are exposed as deterministic runtime entrypoints", () => {
+  const start = read("commands/sidecar-start.md");
+  const status = read("commands/sidecar-status.md");
+  const checkpoint = read("commands/sidecar-checkpoint.md");
+  const task = read("commands/sidecar-task.md");
+  const correct = read("commands/sidecar-correct.md");
+  const stop = read("commands/sidecar-stop.md");
+  const agent = read("agents/sidecar-supervisor.md");
+
+  assert.match(start, /disable-model-invocation:\s*true/);
+  assert.match(start, /codex-companion\.mjs" sidecar-start \$ARGUMENTS/);
+  assert.match(start, /checkpoint Codex progress, score risky behavior, and keep a task list/i);
+  assert.match(status, /disable-model-invocation:\s*true/);
+  assert.match(status, /codex-companion\.mjs" sidecar-status \$ARGUMENTS/);
+  assert.match(status, /active detectors, task list, and steering suggestions/i);
+  assert.match(checkpoint, /codex-companion\.mjs" sidecar-checkpoint \$ARGUMENTS/);
+  assert.match(checkpoint, /telemetry commit/i);
+  assert.match(task, /codex-companion\.mjs" sidecar-task \$ARGUMENTS/);
+  assert.match(correct, /codex-companion\.mjs" sidecar-correct \$ARGUMENTS/);
+  assert.match(correct, /repeat regressions/i);
+  assert.match(stop, /codex-companion\.mjs" sidecar-stop \$ARGUMENTS/);
+  assert.match(agent, /name:\s*sidecar-supervisor/);
+  assert.match(agent, /supervise a Codex run, maintain a live task list, checkpoint progress, surface score changes/i);
+  assert.match(agent, /false claims, suspicious file touches, secret exposure, repeated corrected mistakes, premature completion, or thrash loops/i);
 });
 
 test("rescue command absorbs continue semantics", () => {

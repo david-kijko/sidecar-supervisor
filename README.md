@@ -1,6 +1,6 @@
 # Codex plugin for Claude Code
 
-Use Codex from inside Claude Code for code reviews or to delegate tasks to Codex.
+Use Codex from inside Claude Code for code reviews, task delegation, or supervised runs with Strap sidecar telemetry.
 
 This plugin is for Claude Code users who want an easy way to start using Codex from the workflow
 they already have.
@@ -12,6 +12,7 @@ they already have.
 - `/codex:review` for a normal read-only Codex review
 - `/codex:adversarial-review` for a steerable challenge review
 - `/codex:rescue`, `/codex:status`, `/codex:result`, and `/codex:cancel` to delegate work and manage background jobs
+- `/codex:sidecar-start`, `/codex:sidecar-status`, `/codex:sidecar-checkpoint`, `/codex:sidecar-task`, `/codex:sidecar-correct`, and `/codex:sidecar-stop` to supervise Codex runs with scored checkpoints, detector events, and correction memory
 
 ## Requirements
 
@@ -63,6 +64,7 @@ After install, you should see:
 
 - the slash commands listed below
 - the `codex:codex-rescue` subagent in `/agents`
+- the `codex:sidecar-supervisor` subagent in `/agents`
 
 One simple first run is:
 
@@ -220,6 +222,37 @@ When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted
 
 > [!WARNING]
 > The review gate can create a long-running Claude/Codex loop and may drain usage limits quickly. Only enable it when you plan to actively monitor the session.
+
+### `/codex:sidecar-start`
+
+Starts a Strap sidecar session for the current Claude session. The sidecar keeps a task list, writes checkpoints on phase changes or time intervals, scores risky behavior, and commits telemetry snapshots to a per-session branch.
+
+Examples:
+
+```bash
+/codex:sidecar-start investigate the flaky worker timeout
+/codex:sidecar-start --no-daemon establish a manual supervision session
+```
+
+### `/codex:sidecar-status`
+
+Shows the current sidecar status, latest checkpoint, active detectors, claim checks, and steering suggestions.
+
+### `/codex:sidecar-checkpoint`
+
+Forces an immediate checkpoint and prints the latest composite score, detector summary, and telemetry commit.
+
+### `/codex:sidecar-task`
+
+Adds an explicit task to the session task list.
+
+### `/codex:sidecar-correct`
+
+Records a corrected mistake pattern so the sidecar can flag repeated regressions later in the same supervised run.
+
+### `/codex:sidecar-stop`
+
+Writes a final checkpoint and stops the sidecar for the current session.
 
 ## Typical Flows
 

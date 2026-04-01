@@ -25,7 +25,7 @@ export function runCommand(command, args = [], options = {}) {
 
 export function runCommandChecked(command, args = [], options = {}) {
   const result = runCommand(command, args, options);
-  if (result.error) {
+  if (result.error && result.status !== 0) {
     throw result.error;
   }
   if (result.status !== 0) {

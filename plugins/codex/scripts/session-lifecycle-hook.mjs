@@ -2,6 +2,8 @@
 
 import fs from "node:fs";
 import process from "node:process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { terminateProcessTree } from "./lib/process.mjs";
 import { BROKER_ENDPOINT_ENV } from "./lib/app-server.mjs";
@@ -13,11 +15,15 @@ import {
   sendBrokerShutdown,
   teardownBrokerSession
 } from "./lib/broker-lifecycle.mjs";
+import { getStrapSession } from "./lib/strap-db.mjs";
+import { createCheckpoint, stopSidecarSession } from "./lib/strap-checkpoints.mjs";
+import { loadScoringPolicy } from "./lib/strap-policy.mjs";
 import { loadState, resolveStateFile, saveState } from "./lib/state.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 
 export const SESSION_ID_ENV = "CODEX_COMPANION_SESSION_ID";
 const PLUGIN_DATA_ENV = "CLAUDE_PLUGIN_DATA";
+const ROOT_DIR = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 
 function readHookInput() {
   const raw = fs.readFileSync(0, "utf8").trim();
@@ -80,6 +86,7 @@ function handleSessionStart(input) {
 
 async function handleSessionEnd(input) {
   const cwd = input.cwd || process.cwd();
+  const workspaceRoot = resolveWorkspaceRoot(cwd);
   const brokerSession =
     loadBrokerSession(cwd) ??
     (process.env[BROKER_ENDPOINT_ENV]
@@ -99,7 +106,27 @@ async function handleSessionEnd(input) {
     await sendBrokerShutdown(brokerEndpoint);
   }
 
-  cleanupSessionJobs(cwd, input.session_id || process.env[SESSION_ID_ENV]);
+  const sessionId = input.session_id || process.env[SESSION_ID_ENV];
+  cleanupSessionJobs(cwd, sessionId);
+
+  if (sessionId && getStrapSession(sessionId)?.active) {
+    try {
+      createCheckpoint({
+        workspaceRoot,
+        sessionId,
+        policy: loadScoringPolicy(ROOT_DIR),
+        reason: "session-end"
+      });
+    } catch {
+      // Ignore sidecar checkpoint failures during shutdown cleanup.
+    }
+    stopSidecarSession({
+      workspaceRoot,
+      sessionId,
+      finalReason: "session-end"
+    });
+  }
+
   teardownBrokerSession({
     endpoint: brokerEndpoint,
     pidFile,

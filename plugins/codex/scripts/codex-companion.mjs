@@ -50,6 +50,22 @@ import {
   runTrackedJob,
   SESSION_ID_ENV
 } from "./lib/tracked-jobs.mjs";
+import { addCorrection, addTask } from "./lib/strap-db.mjs";
+import {
+  createCheckpoint,
+  createSidecarSession,
+  getSidecarStatus,
+  maybeCreateAutomaticCheckpoint,
+  setSidecarDaemonPid,
+  stopSidecarSession
+} from "./lib/strap-checkpoints.mjs";
+import { loadScoringPolicy } from "./lib/strap-policy.mjs";
+import {
+  renderSidecarCheckpointReport,
+  renderSidecarMutationReport,
+  renderSidecarStartReport,
+  renderSidecarStatusReport
+} from "./lib/strap-render.mjs";
 import { resolveWorkspaceRoot } from "./lib/workspace.mjs";
 import {
   renderNativeReviewResult,
@@ -80,7 +96,13 @@ function printUsage() {
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
-      "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
+      "  node scripts/codex-companion.mjs cancel [job-id] [--json]",
+      "  node scripts/codex-companion.mjs sidecar-start [--session-id <id>] [--no-daemon] [task]",
+      "  node scripts/codex-companion.mjs sidecar-status [--session-id <id>] [--json]",
+      "  node scripts/codex-companion.mjs sidecar-checkpoint [--session-id <id>] [--reason <reason>] [--json]",
+      "  node scripts/codex-companion.mjs sidecar-task [--session-id <id>] [task]",
+      "  node scripts/codex-companion.mjs sidecar-correct [--session-id <id>] [--note <text>] <pattern>",
+      "  node scripts/codex-companion.mjs sidecar-stop [--session-id <id>] [--json]"
     ].join("\n")
   );
 }
@@ -151,6 +173,10 @@ function resolveCommandCwd(options = {}) {
 
 function resolveCommandWorkspace(options = {}) {
   return resolveWorkspaceRoot(resolveCommandCwd(options));
+}
+
+function loadSidecarPolicy() {
+  return loadScoringPolicy(ROOT_DIR);
 }
 
 function sleep(ms) {
@@ -623,6 +649,19 @@ function spawnDetachedTaskWorker(cwd, jobId) {
   return child;
 }
 
+function spawnDetachedSidecarDaemon(cwd, sessionId) {
+  const scriptPath = path.join(ROOT_DIR, "scripts", "codex-companion.mjs");
+  const child = spawn(process.execPath, [scriptPath, "sidecar-daemon", "--cwd", cwd, "--session-id", sessionId], {
+    cwd,
+    env: process.env,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true
+  });
+  child.unref();
+  return child;
+}
+
 function enqueueBackgroundTask(cwd, job, request) {
   const { logFile } = createTrackedProgress(job);
   appendLogLine(logFile, "Queued for background execution.");
@@ -649,6 +688,219 @@ function enqueueBackgroundTask(cwd, job, request) {
     },
     logFile
   };
+}
+
+function resolveSidecarSessionId(options, { generateIfMissing = false } = {}) {
+  const explicit = options["session-id"] ? String(options["session-id"]).trim() : "";
+  if (explicit) {
+    return explicit;
+  }
+  const envSessionId = process.env[SESSION_ID_ENV] ? String(process.env[SESSION_ID_ENV]).trim() : "";
+  if (envSessionId) {
+    return envSessionId;
+  }
+  if (generateIfMissing) {
+    return generateJobId("sidecar");
+  }
+  throw new Error("No session id is available. Start the sidecar from a Claude session or pass --session-id <id>.");
+}
+
+function ensureSidecarStarted(workspaceRoot, sessionId, policy) {
+  const status = getSidecarStatus({ workspaceRoot, sessionId, policy });
+  if (!status) {
+    throw new Error(`No Strap sidecar session found for ${sessionId}. Start it first.`);
+  }
+  return status;
+}
+
+function maybeStartSidecarDaemon(cwd, workspaceRoot, sessionId, policy) {
+  const status = getSidecarStatus({ workspaceRoot, sessionId, policy });
+  if (status?.daemonActive) {
+    return status;
+  }
+  const child = spawnDetachedSidecarDaemon(cwd, sessionId);
+  setSidecarDaemonPid({
+    workspaceRoot,
+    sessionId,
+    pid: child.pid ?? null
+  });
+  return getSidecarStatus({ workspaceRoot, sessionId, policy });
+}
+
+function handleSidecarStart(argv) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id"],
+    booleanOptions: ["json", "no-daemon"]
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options, { generateIfMissing: true });
+  const initialTask = positionals.join(" ").trim();
+
+  createSidecarSession({
+    workspaceRoot,
+    sessionId,
+    policy,
+    initialTasks: initialTask ? [initialTask] : []
+  });
+  createCheckpoint({
+    workspaceRoot,
+    sessionId,
+    policy,
+    reason: "session-start"
+  });
+  const status = options["no-daemon"]
+    ? ensureSidecarStarted(workspaceRoot, sessionId, policy)
+    : maybeStartSidecarDaemon(cwd, workspaceRoot, sessionId, policy);
+
+  outputCommandResult(status, renderSidecarStartReport(status), options.json);
+}
+
+function handleSidecarStatus(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id"],
+    booleanOptions: ["json"]
+  });
+
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options);
+  maybeCreateAutomaticCheckpoint({
+    workspaceRoot,
+    sessionId,
+    policy
+  });
+  const status = ensureSidecarStarted(workspaceRoot, sessionId, policy);
+  outputCommandResult(status, renderSidecarStatusReport(status), options.json);
+}
+
+function handleSidecarCheckpoint(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id", "reason"],
+    booleanOptions: ["json"]
+  });
+
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options);
+  const checkpoint = createCheckpoint({
+    workspaceRoot,
+    sessionId,
+    policy,
+    reason: options.reason || "manual"
+  });
+  outputCommandResult(checkpoint, renderSidecarCheckpointReport(checkpoint), options.json);
+}
+
+function handleSidecarTask(argv) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id"],
+    booleanOptions: ["json"]
+  });
+
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options);
+  ensureSidecarStarted(workspaceRoot, sessionId, policy);
+  const title = positionals.join(" ").trim();
+  if (!title) {
+    throw new Error("Provide a task title to add to the sidecar task list.");
+  }
+  addTask(sessionId, title);
+  const payload = {
+    sessionId,
+    message: `Added task: ${title}`
+  };
+  outputCommandResult(payload, renderSidecarMutationReport(payload), options.json);
+}
+
+function handleSidecarCorrect(argv) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id", "note"],
+    booleanOptions: ["json"]
+  });
+
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options);
+  ensureSidecarStarted(workspaceRoot, sessionId, policy);
+  const pattern = positionals.join(" ").trim();
+  if (!pattern) {
+    throw new Error("Provide a correction pattern to remember.");
+  }
+  addCorrection(sessionId, pattern, options.note || "");
+  const payload = {
+    sessionId,
+    message: options.note ? `Stored correction: ${pattern} (${options.note})` : `Stored correction: ${pattern}`
+  };
+  outputCommandResult(payload, renderSidecarMutationReport(payload), options.json);
+}
+
+function handleSidecarStop(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id"],
+    booleanOptions: ["json"]
+  });
+
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options);
+  ensureSidecarStarted(workspaceRoot, sessionId, policy);
+  createCheckpoint({
+    workspaceRoot,
+    sessionId,
+    policy,
+    reason: "manual-stop"
+  });
+  stopSidecarSession({
+    workspaceRoot,
+    sessionId,
+    finalReason: "manual-stop"
+  });
+  const payload = {
+    sessionId,
+    message: "Stopped the Strap sidecar session."
+  };
+  outputCommandResult(payload, renderSidecarMutationReport(payload), options.json);
+}
+
+async function handleSidecarDaemon(argv) {
+  const { options } = parseCommandInput(argv, {
+    valueOptions: ["cwd", "session-id"]
+  });
+
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const policy = loadSidecarPolicy();
+  const sessionId = resolveSidecarSessionId(options);
+  let running = true;
+  const stop = () => {
+    running = false;
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+
+  try {
+    while (running) {
+      const status = getSidecarStatus({ workspaceRoot, sessionId, policy });
+      if (!status) {
+        break;
+      }
+      maybeCreateAutomaticCheckpoint({
+        workspaceRoot,
+        sessionId,
+        policy
+      });
+      await sleep(5000);
+    }
+  } finally {
+    setSidecarDaemonPid({
+      workspaceRoot,
+      sessionId,
+      pid: null
+    });
+  }
 }
 
 async function handleReviewCommand(argv, config) {
@@ -994,6 +1246,27 @@ async function main() {
       break;
     case "cancel":
       await handleCancel(argv);
+      break;
+    case "sidecar-start":
+      handleSidecarStart(argv);
+      break;
+    case "sidecar-status":
+      handleSidecarStatus(argv);
+      break;
+    case "sidecar-checkpoint":
+      handleSidecarCheckpoint(argv);
+      break;
+    case "sidecar-task":
+      handleSidecarTask(argv);
+      break;
+    case "sidecar-correct":
+      handleSidecarCorrect(argv);
+      break;
+    case "sidecar-stop":
+      handleSidecarStop(argv);
+      break;
+    case "sidecar-daemon":
+      await handleSidecarDaemon(argv);
       break;
     default:
       throw new Error(`Unknown subcommand: ${subcommand}`);

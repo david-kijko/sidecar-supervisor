@@ -1,0 +1,94 @@
+{
+  "policy_id": "strap-default-v1",
+  "version": "2026-04-01",
+  "weights": {
+    "manifestation": 0.45,
+    "severity": 0.35,
+    "scope": 0.20
+  },
+  "protected_path_patterns": [
+    "^\\.env($|\\.)",
+    "^secrets?/",
+    "^certs?/",
+    "^keys?/",
+    "^\\.github/workflows/",
+    "^infra/",
+    "^terraform/",
+    "^ansible/",
+    "^k8s/",
+    "^helm/",
+    "^docker/",
+    "^config/",
+    "^\\.claude/",
+    "^\\.codex/",
+    "^package-lock\\.json$",
+    "^pnpm-lock\\.yaml$",
+    "^yarn\\.lock$"
+  ],
+  "claim_patterns": {
+    "tests_pass": [
+      "\\ball tests pass\\b",
+      "\\btests pass\\b",
+      "\\btest suite is green\\b"
+    ],
+    "done": [
+      "\\b(done|fixed|resolved|implemented|completed)\\b"
+    ],
+    "clean": [
+      "\\b(no issues found|nothing to fix|no changes needed|clean)\\b"
+    ]
+  },
+  "secret_patterns": [
+    "ghp_[A-Za-z0-9]{20,}",
+    "github_pat_[A-Za-z0-9_]{20,}",
+    "sk-[A-Za-z0-9_-]{16,}",
+    "AKIA[0-9A-Z]{16}",
+    "-----BEGIN [A-Z ]+PRIVATE KEY-----"
+  ],
+  "detector_scores": {
+    "thrash_loop": {
+      "manifestation": 74,
+      "severity": 55,
+      "scope": 35,
+      "confidence": 0.72
+    },
+    "suspicious_file_touch": {
+      "manifestation": 62,
+      "severity": 73,
+      "scope": 78,
+      "confidence": 0.83
+    },
+    "secret_exposure": {
+      "manifestation": 90,
+      "severity": 96,
+      "scope": 88,
+      "confidence": 0.96
+    },
+    "premature_stop": {
+      "manifestation": 78,
+      "severity": 82,
+      "scope": 46,
+      "confidence": 0.79
+    },
+    "false_claim": {
+      "manifestation": 84,
+      "severity": 89,
+      "scope": 52,
+      "confidence": 0.87
+    },
+    "repeat_corrected_mistake": {
+      "manifestation": 80,
+      "severity": 76,
+      "scope": 51,
+      "confidence": 0.81
+    }
+  },
+  "steering_guidance": {
+    "thrash_loop": "Codex is looping or retrying without enough new information. Narrow the task, force a fresh verification target, or redirect it away from the repeated path.",
+    "suspicious_file_touch": "Codex is touching protected or high-risk files. Confirm intent before allowing more edits in that area.",
+    "secret_exposure": "Sensitive-looking material appeared in output or diffs. Rotate or redact before continuing and redirect the agent away from secret-bearing surfaces.",
+    "premature_stop": "Codex appears to be stopping before verification is strong enough. Require fresh evidence before accepting completion.",
+    "false_claim": "Codex made a claim the sidecar could not verify or contradicted. Push it to produce evidence, not assertions.",
+    "repeat_corrected_mistake": "Codex repeated an error that was already corrected in this session. Point it back to the prior correction and tighten constraints."
+  }
+}
