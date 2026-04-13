@@ -71,7 +71,7 @@ done
 
 mkdir -p "$HOME/.hephaestus/outputs"
 
-timestamp="$(date +%Y%m%d-%H%M%S)"
+timestamp="$(date +%Y%m%d-%H%M%S)-$$"
 output_file="$HOME/.hephaestus/outputs/hephaestus-$timestamp.md"
 
 codex_cmd=(
