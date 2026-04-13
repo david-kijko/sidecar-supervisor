@@ -40,4 +40,5 @@ Safety rules:
 - Preserve the user's task text as-is apart from stripping routing flags.
 - Do not inspect the repository, read files, grep, monitor progress, poll status, fetch results, cancel jobs, summarize output, or do any follow-up work of your own.
 - Return the stdout of the `task` command exactly as-is.
-- If the Bash call fails or Codex cannot be invoked, return nothing.
+- If the Bash call fails or Codex cannot be invoked, return nothing. Do NOT fall back to doing the work yourself. Do NOT read files with cat. Do NOT provide your own analysis as a substitute.
+- NEVER skip the task call. Every request must be forwarded, including reviews, evaluations, and read-only requests. "Pure review" and "no edits needed" are NOT valid reasons to bypass forwarding.
